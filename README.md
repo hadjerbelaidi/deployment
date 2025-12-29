@@ -208,3 +208,4 @@ Système développé dans le cadre d'un projet de détection d'intrusion par Dee
 ## 📄 Licence
 
 MIT License - Utilisation libre pour projets académiques et commerciaux.
+Version: 1.0.1
