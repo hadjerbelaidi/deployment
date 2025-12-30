@@ -3,105 +3,99 @@ from flask_cors import CORS
 import numpy as np
 import pandas as pd
 import os
-from api.predictor import CICIDSPredictor
+import tensorflow as tf
+import joblib
 import logging
 
 # Configuration du logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = Flask(__name__, static_folder='../frontend') # Ajusté pour pointer vers le dossier frontend à la racine
+app = Flask(__name__, static_folder='../frontend') 
 CORS(app)
 
-# Initialiser le prédicteur sans arguments (la classe gère ses propres chemins)
+# --- CHARGEMENT DIRECT DU MODÈLE ET DU SCALER ---
+MODEL_PATH = os.path.join(os.path.dirname(__file__), 'mlp_model_subset.h5')
+SCALER_PATH = os.path.join(os.path.dirname(__file__), 'scaler.pkl')
+
+model = None
+scaler = None
+
 try:
-    predictor = CICIDSPredictor()
-    logger.info("✅ Modèle chargé avec succès")
+    if os.path.exists(MODEL_PATH):
+        model = tf.keras.models.load_model(MODEL_PATH)
+        logger.info("✅ Modèle chargé avec succès")
+    if os.path.exists(SCALER_PATH):
+        scaler = joblib.load(SCALER_PATH)
+        logger.info("✅ Scaler chargé avec succès")
 except Exception as e:
-    logger.error(f"❌ Erreur chargement modèle: {e}")
-    predictor = None
+    logger.error(f"❌ Erreur chargement fichiers ML: {e}")
 
 @app.route('/')
 def index():
-    """Servir la page d'accueil"""
     return send_from_directory(app.static_folder, 'index.html')
 
 @app.route('/<path:path>')
 def static_files(path):
-    """Servir les fichiers statiques (css, js, images)"""
     return send_from_directory(app.static_folder, path)
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
-    """Vérifier l'état de l'API"""
     return jsonify({
         'status': 'healthy',
-        'model_loaded': predictor is not None,
-        'version': '1.0.0'
+        'model_loaded': model is not None,
+        'scaler_loaded': scaler is not None
     })
-
-@app.route('/api/predict', methods=['POST'])
-def predict():
-    """Prédire si une connexion est une attaque (Données JSON)"""
-    if predictor is None:
-        return jsonify({'error': 'Modèle non chargé'}), 500
-    
-    try:
-        data = request.get_json()
-        if 'features' not in data:
-            return jsonify({'error': 'Clé "features" manquante'}), 400
-        
-        features = data['features']
-        # Utilisation de la méthode predict de notre classe
-        result = predictor.predict(np.array([features]))
-        
-        return jsonify({'prediction': result[0]})
-    
-    except Exception as e:
-        logger.error(f"Erreur prédiction: {e}")
-        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/predict_batch', methods=['POST'])
 def predict_batch():
-    """Prédire plusieurs connexions depuis un fichier CSV"""
-    if predictor is None:
-        return jsonify({'error': 'Modèle non chargé'}), 500
+    if model is None:
+        return jsonify({'error': 'Modèle non chargé sur le serveur'}), 500
     
     try:
         if 'file' not in request.files:
             return jsonify({'error': 'Aucun fichier fourni'}), 400
         
         file = request.files['file']
-        if file.filename == '' or not file.filename.endswith('.csv'):
-            return jsonify({'error': 'Format invalide. Utilisez CSV'}), 400
-        
-        # Lire le CSV
         df = pd.read_csv(file)
         
-        # Supposons que le CSV contient uniquement les features nécessaires
-        results = predictor.predict(df)
+        # --- NETTOYAGE AUTOMATIQUE ---
+        # 1. On retire la colonne Label si elle est présente
+        if 'Label' in df.columns:
+            df = df.drop(columns=['Label'])
+        elif 'label' in df.columns:
+            df = df.drop(columns=['label'])
+
+        # 2. On s'assure d'avoir exactement 78 colonnes
+        # Si ton modèle a été entraîné sur 78 features, il en faut 78 ici.
+        if df.shape[1] != 78:
+            return jsonify({'error': f'Le modèle attend 78 colonnes, reçu {df.shape[1]}'}), 400
+
+        # 3. Application du scaler (INDISPENSABLE pour un MLP)
+        # On transforme les données brutes du CSV en données normalisées
+        X_scaled = scaler.transform(df)
+        
+        # 4. Prédiction
+        predictions = model.predict(X_scaled)
+        
+        # 5. Conversion des probabilités (0.0 à 1.0) en classes (0 ou 1)
+        results = (predictions > 0.5).astype(int).flatten().tolist()
         
         return jsonify({'predictions': results})
     
     except Exception as e:
-        logger.error(f"Erreur prédiction batch: {e}")
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"❌ Erreur pendant le traitement: {str(e)}")
+        return jsonify({'error': f"Erreur serveur: {str(e)}"}), 500
 
 @app.route('/api/stats', methods=['GET'])
 def get_stats():
-    """Obtenir les informations du projet pour le mémoire"""
     return jsonify({
-        'model_architecture': 'MLP (Multi-Layer Perceptron)',
+        'model_architecture': 'MLP (128-64-32)',
         'accuracy': 99.36,
         'dataset': 'CICIDS2017',
-        'cloud_platform': 'Render (PaaS)',
-        'attack_types': [
-            'DDoS', 'PortScan', 'BotNet', 
-            'Web Attack', 'Brute Force SSH/FTP'
-        ]
+        'cloud_platform': 'Render (PaaS)'
     })
 
 if __name__ == '__main__':
-    # Render utilise la variable d'environnement PORT
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port, debug=False)
