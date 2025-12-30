@@ -27,6 +27,8 @@ class CICIDSPredictor:
         data_scaled = self.scaler.transform(data)
         # Prédiction sans logs pour économiser du CPU/RAM
         predictions = self.model.predict(data_scaled, verbose=0)
+        print(f"Probabilité brute pour ce fichier : {predictions}")
         return (predictions > 0.8).astype(int).flatten().tolist()
+
 
 
