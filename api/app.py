@@ -5,14 +5,14 @@ import os
 import logging
 from api.predictor import CICIDSPredictor
 
-# Configuration du logging pour voir les erreurs dans les logs Render
+# Configuration du logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__, static_folder='../frontend')
 CORS(app)
 
-# Initialisation du prédicteur (charge le modèle et le scaler)
+# Initialisation du prédicteur
 try:
     predictor = CICIDSPredictor()
     logger.info("✅ Système de prédiction chargé et prêt.")
@@ -46,62 +46,75 @@ def predict_batch():
         return jsonify({'error': 'Le modèle n\'est pas disponible sur le serveur.'}), 500
     
     try:
-        # 1. Vérifier si un fichier est présent dans la requête
+        # 1. Vérifier si un fichier est présent
         if 'file' not in request.files:
             return jsonify({'error': 'Aucun fichier n\'a été envoyé.'}), 400
         
         file = request.files['file']
         if file.filename == '':
             return jsonify({'error': 'Nom de fichier vide.'}), 400
-
-        # 2. Charger le CSV en mémoire avec Pandas
-        df = pd.read_csv(file)
-        logger.info(f"Fichier reçu. Colonnes détectées : {df.shape[1]}")
-
-        # 3. NETTOYAGE AUTOMATIQUE DES DONNÉES
-        # On retire les colonnes non-numériques ou labels qui causent l'erreur 500
-        cols_to_drop = [
-            'Label', 'label', ' Label', 'Label ', 
-            'Source IP', 'Destination IP', 'Timestamp', 'Flow ID', 'Unnamed: 0'
-        ]
         
-        # Supprime les colonnes de la liste si elles existent dans le CSV
+        # 2. Charger le CSV
+        df = pd.read_csv(file)
+        logger.info(f"📁 Fichier reçu - Shape: {df.shape}")
+        
+        # 3. NETTOYER LES NOMS DE COLONNES (enlever les espaces)
+        df.columns = df.columns.str.strip()
+        logger.info(f"🧹 Colonnes nettoyées: {list(df.columns[:5])}...")
+        
+        # 4. Supprimer les colonnes non-numériques
+        cols_to_drop = [
+            'Label', 'label', 'Source IP', 'Destination IP', 
+            'Timestamp', 'Flow ID', 'Unnamed: 0'
+        ]
         df_cleaned = df.drop(columns=[c for c in cols_to_drop if c in df.columns], errors='ignore')
-
-        # 4. FORCER LE FORMAT (78 colonnes attendues par ton MLP)
-        # Si après nettoyage il reste plus de 78 colonnes, on ne garde que les 78 premières
+        
+        # 5. Convertir tout en numérique (au cas où)
+        df_cleaned = df_cleaned.apply(pd.to_numeric, errors='coerce')
+        
+        # 6. Remplir les valeurs manquantes avec 0
+        df_cleaned = df_cleaned.fillna(0)
+        
+        logger.info(f"✅ Données nettoyées - Shape: {df_cleaned.shape}")
+        
+        # 7. Vérifier le nombre de colonnes (78 attendues)
         if df_cleaned.shape[1] > 78:
-            logger.warning(f"Trop de colonnes ({df_cleaned.shape[1]}). Troncature à 78.")
+            logger.warning(f"⚠️ Trop de colonnes ({df_cleaned.shape[1]}). Troncature à 78.")
             df_cleaned = df_cleaned.iloc[:, :78]
         
         if df_cleaned.shape[1] < 78:
             return jsonify({
-                'error': f'Le modèle attend 78 colonnes numériques, mais le fichier en contient {df_cleaned.shape[1]}.'
+                'error': f'Le modèle attend 78 colonnes numériques, mais le fichier en contient {df_cleaned.shape[1]} après nettoyage.'
             }), 400
-
-        # 5. EXECUTER LA PRÉDICTION
-        # Le prédicteur va appliquer le scaler.pkl automatiquement
+        
+        # 8. PRÉDICTION
         results = predictor.predict(df_cleaned)
         
-        logger.info("Prédiction réussie !")
-        return jsonify({'predictions': results})
+        logger.info(f"✅ Prédiction réussie ! {len(results)} lignes analysées")
+        
+        return jsonify({
+            'predictions': results,
+            'total': len(results),
+            'attacks': sum(results),
+            'normal': len(results) - sum(results)
+        })
     
     except Exception as e:
-        logger.error(f"❌ Erreur lors de l'analyse : {str(e)}")
-        # On renvoie l'erreur réelle pour t'aider à débugger
-        return jsonify({'error': f"Erreur interne : {str(e)}"}), 500
+        logger.error(f"❌ Erreur : {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return jsonify({'error': f"Erreur : {str(e)}"}), 500
 
 @app.route('/api/stats', methods=['GET'])
 def get_stats():
-    """Retourne les métriques pour le tableau de bord"""
+    """Retourne les métriques"""
     return jsonify({
-        'model_type': 'Multi-Layer Perceptron (MLP)',
-        'framework': 'TensorFlow/Keras',
+        'model_architecture': 'MLP (Multi-Layer Perceptron)',
+        'accuracy': 99.36,
         'dataset': 'CICIDS2017',
-        'accuracy_reported': '99.36%'
+        'cloud_platform': 'Render'
     })
 
 if __name__ == '__main__':
-    # Utilisation du port défini par Render ou 10000 par défaut
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port)
