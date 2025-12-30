@@ -46,9 +46,9 @@ def predict_batch():
         return jsonify({'error': 'Le modèle n\'est pas disponible sur le serveur.'}), 500
     
     try:
-        # 1. Vérifier si un fichier est présent
+        # 1. Vérifier la présence du fichier
         if 'file' not in request.files:
-            return jsonify({'error': 'Aucun fichier n\'a été envoyé.'}), 400
+            return jsonify({'error': 'Aucun fichier fourni'}), 400
         
         file = request.files['file']
         if file.filename == '':
@@ -56,38 +56,40 @@ def predict_batch():
         
         # 2. Charger le CSV
         df = pd.read_csv(file)
-        logger.info(f"📁 Fichier reçu - Shape: {df.shape}")
+        logger.info(f"📁 Fichier reçu - Dimensions initiales: {df.shape}")
+
+        # 3. Récupérer les noms exacts attendus par le Scaler
+        # C'est ici que l'on récupère les noms avec/sans espaces du fit original
+        expected_features = predictor.scaler.feature_names_in_
         
-        # 3. NETTOYER LES NOMS DE COLONNES (enlever les espaces)
-        df.columns = df.columns.str.strip()
-        logger.info(f"🧹 Colonnes nettoyées: {list(df.columns[:5])}...")
-        
-        # 4. Supprimer les colonnes non-numériques
+        # 4. Nettoyage initial des colonnes de texte/labels
+        # On retire les colonnes inutiles pour ne garder que les features
         cols_to_drop = [
-            'Label', 'label', 'Source IP', 'Destination IP', 
-            'Timestamp', 'Flow ID', 'Unnamed: 0'
+            'Label', 'label', 'Flow ID', 'Source IP', 
+            'Destination IP', 'Timestamp', 'Unnamed: 0'
         ]
         df_cleaned = df.drop(columns=[c for c in cols_to_drop if c in df.columns], errors='ignore')
-        
-        # 5. Convertir tout en numérique (au cas où)
-        df_cleaned = df_cleaned.apply(pd.to_numeric, errors='coerce')
-        
-        # 6. Remplir les valeurs manquantes avec 0
-        df_cleaned = df_cleaned.fillna(0)
-        
-        logger.info(f"✅ Données nettoyées - Shape: {df_cleaned.shape}")
-        
-        # 7. Vérifier le nombre de colonnes (78 attendues)
+
+        # 5. Gestion des colonnes et Renommage forcé
+        # Si après retrait des labels on a trop de colonnes, on tronque à 78
         if df_cleaned.shape[1] > 78:
-            logger.warning(f"⚠️ Trop de colonnes ({df_cleaned.shape[1]}). Troncature à 78.")
             df_cleaned = df_cleaned.iloc[:, :78]
-        
-        if df_cleaned.shape[1] < 78:
+
+        # Si on a bien 78 colonnes, on leur donne les noms exacts du scaler
+        # Cela règle l'erreur "Feature names unseen at fit time"
+        if df_cleaned.shape[1] == len(expected_features):
+            df_cleaned.columns = expected_features
+            logger.info("✅ Colonnes renommées pour correspondre au Scaler")
+        else:
             return jsonify({
-                'error': f'Le modèle attend 78 colonnes numériques, mais le fichier en contient {df_cleaned.shape[1]} après nettoyage.'
+                'error': f'Le modèle attend {len(expected_features)} colonnes, reçu {df_cleaned.shape[1]} après nettoyage.'
             }), 400
-        
-        # 8. PRÉDICTION
+
+        # 6. Conversion numérique et gestion des NaN
+        df_cleaned = df_cleaned.apply(pd.to_numeric, errors='coerce').fillna(0)
+
+        # 7. PRÉDICTION
+        # Envoie les données au predictor qui fera le transform() et le predict()
         results = predictor.predict(df_cleaned)
         
         logger.info(f"✅ Prédiction réussie ! {len(results)} lignes analysées")
@@ -100,14 +102,13 @@ def predict_batch():
         })
     
     except Exception as e:
-        logger.error(f"❌ Erreur : {str(e)}")
-        import traceback
-        logger.error(traceback.format_exc())
-        return jsonify({'error': f"Erreur : {str(e)}"}), 500
+        logger.error(f"❌ Erreur Serveur : {str(e)}")
+        # On retourne l'erreur détaillée pour le débug
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/stats', methods=['GET'])
 def get_stats():
-    """Retourne les métriques"""
+    """Retourne les métriques du modèle"""
     return jsonify({
         'model_architecture': 'MLP (Multi-Layer Perceptron)',
         'accuracy': 99.36,
@@ -116,5 +117,6 @@ def get_stats():
     })
 
 if __name__ == '__main__':
+    # Configuration du port pour Render
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port)
