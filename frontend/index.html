@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Détection d'Intrusion Cloud - CICIDS2017</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>🛡️ Détection d'Attaque Cloud (MLP)</h1>
+        <p>Analyse du trafic réseau en temps réel via Render</p>
+
+        <div class="card">
+            <h3>Tester un fichier de trafic (CSV)</h3>
+            <input type="file" id="csvFile" accept=".csv">
+            <button onclick="uploadFile()" id="uploadBtn">Analyser le trafic</button>
+        </div>
+
+        <div id="loading" class="hidden">Analyse en cours dans le Cloud... ⏳</div>
+
+        <div id="resultArea" class="hidden">
+            <h3>Résultats de l'analyse :</h3>
+            <div id="predictionList"></div>
+        </div>
+    </div>
+    <script src="script.js"></script>
+</body>
+</html>
