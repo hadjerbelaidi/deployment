@@ -2,6 +2,9 @@ import tensorflow as tf
 import numpy as np
 import joblib
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 class CICIDSPredictor:
     def __init__(self):
@@ -22,23 +25,20 @@ class CICIDSPredictor:
             print("✅ Ressources ML chargées !")
             
     def predict(self, data):
-    self._load_resources()
-    
-    # 1. Normalisation
-    data_scaled = self.scaler.transform(data)
-    
-    # 2. Prédiction (Probabilités brutes)
-    predictions = self.model.predict(data_scaled, verbose=0)
-    
-    # --- LOGS DE DEBUG (À regarder dans Render) ---
-    prob = predictions.flatten()[0]
-    print(f"DEBUG - Probabilité brute : {prob}")
-    # ----------------------------------------------
-
-    # 3. Retourne 1 si prob > 0.5
-    return (predictions > 0.7).astype(int).flatten().tolist() 
-    
-
-
-
-
+        # --- CETTE PARTIE DOIT ÊTRE INDENTÉE ---
+        self._load_resources()
+        
+        # 1. Normalisation
+        data_scaled = self.scaler.transform(data)
+        
+        # 2. Prédiction (Probabilités brutes)
+        predictions = self.model.predict(data_scaled, verbose=0)
+        
+        # --- LOGS DE DEBUG (Visibles dans Render) ---
+        # On affiche les probabilités pour chaque ligne du CSV
+        probs = predictions.flatten().tolist()
+        print(f"DEBUG - Probabilités brutes détectées : {probs}")
+        
+        # 3. Seuil de décision (Ajusté à 0.7 pour plus de précision)
+        # Retourne 1 (Attack) si probabilité > 0.7, sinon 0 (Normal)
+        return (predictions > 0.7).astype(int).flatten().tolist()
