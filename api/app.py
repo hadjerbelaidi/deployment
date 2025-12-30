@@ -115,8 +115,8 @@ def get_stats():
         'dataset': 'CICIDS2017',
         'cloud_platform': 'Render'
     })
-
 if __name__ == '__main__':
-    # Configuration du port pour Render
     port = int(os.environ.get('PORT', 10000))
-    app.run(host='0.0.0.0', port=port)
+    # On désactive le debug pour éviter les doubles chargements de modèle
+    app.run(host='0.0.0.0', port=port, debug=False)
+
