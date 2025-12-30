@@ -20,15 +20,24 @@ class CICIDSPredictor:
             self.model = tf.keras.models.load_model(model_path, compile=False)
             self.scaler = joblib.load(scaler_path)
             print("✅ Ressources ML chargées !")
-
+            
     def predict(self, data):
-        self._load_resources()
-        # Normalisation
-        data_scaled = self.scaler.transform(data)
-        # Prédiction sans logs pour économiser du CPU/RAM
-        predictions = self.model.predict(data_scaled, verbose=0)
-        print(f"Probabilité brute pour ce fichier : {predictions}")
-        return (predictions > 0.7).astype(int).flatten().tolist()
+    self._load_resources()
+    
+    # 1. Normalisation
+    data_scaled = self.scaler.transform(data)
+    
+    # 2. Prédiction (Probabilités brutes)
+    predictions = self.model.predict(data_scaled, verbose=0)
+    
+    # --- LOGS DE DEBUG (À regarder dans Render) ---
+    prob = predictions.flatten()[0]
+    print(f"DEBUG - Probabilité brute : {prob}")
+    # ----------------------------------------------
+
+    # 3. Retourne 1 si prob > 0.5
+    return (predictions > 0.7).astype(int).flatten().tolist() 
+    
 
 
 
