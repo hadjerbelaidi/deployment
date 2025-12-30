@@ -1,0 +1,9 @@
+body { font-family: 'Segoe UI', sans-serif; background-color: #f4f7f6; display: flex; justify-content: center; padding: 50px; }
+.container { max-width: 800px; width: 100%; text-align: center; }
+.card { background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 20px; }
+button { background-color: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; }
+button:hover { background-color: #0056b3; }
+.hidden { display: none; }
+.attack { color: #dc3545; font-weight: bold; padding: 5px; border-bottom: 1px solid #ddd; }
+.benign { color: #28a745; font-weight: bold; padding: 5px; border-bottom: 1px solid #ddd; }
+#predictionList { text-align: left; background: #eee; padding: 15px; border-radius: 5px; max-height: 300px; overflow-y: auto; }
