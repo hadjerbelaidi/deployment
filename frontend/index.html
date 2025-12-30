@@ -8,23 +8,27 @@
 </head>
 <body>
     <div class="container">
+        <div class="status-bar">
+            <span class="status-indicator"></span>
+            <span id="status-text">Vérification du serveur...</span>
+        </div>
+
         <h1>🛡️ Détection d'Attaque Cloud (MLP)</h1>
         <p>Analyse du trafic réseau en temps réel via Render</p>
 
         <div class="card">
             <h3>Tester un fichier de trafic (CSV)</h3>
-            <input type="file" id="csvFile" accept=".csv">
-            <button id="batch-btn" onclick="predictBatch()">Analyser le trafic</button>
+            <input type="file" id="csv-file" accept=".csv" onchange="handleFileSelect(event)">
+            <p id="file-name" style="font-size: 0.9em; color: #666;"></p>
+            <button id="batch-btn" onclick="predictBatch()" disabled>Analyser le trafic</button>
         </div>
 
+        <div id="stats-content" class="stats-grid"></div>
+
+        <div id="batch-result" class="result-box" style="display: none;"></div>
+        
         <div id="loading" class="hidden">Analyse en cours dans le Cloud... ⏳</div>
-
-        <div id="resultArea" class="hidden">
-            <h3>Résultats de l'analyse :</h3>
-            <div id="predictionList"></div>
-        </div>
     </div>
     <script src="script.js"></script>
 </body>
 </html>
-
