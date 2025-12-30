@@ -14,7 +14,7 @@
         <div class="card">
             <h3>Tester un fichier de trafic (CSV)</h3>
             <input type="file" id="csvFile" accept=".csv">
-            <button onclick="uploadFile()" id="uploadBtn">Analyser le trafic</button>
+            <button id="batch-btn" onclick="predictBatch()">Analyser le trafic</button>
         </div>
 
         <div id="loading" class="hidden">Analyse en cours dans le Cloud... ⏳</div>
@@ -27,3 +27,4 @@
     <script src="script.js"></script>
 </body>
 </html>
+
