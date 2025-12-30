@@ -117,6 +117,6 @@ def get_stats():
     })
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 10000))
-    # On désactive le debug pour éviter les doubles chargements de modèle
+    # Ne change rien d'autre, mais assure-toi que debug est à False
     app.run(host='0.0.0.0', port=port, debug=False)
 
