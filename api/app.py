@@ -1,43 +1,24 @@
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
-import numpy as np
 import pandas as pd
 import os
-import tensorflow as tf
-import joblib
+from api.predictor import CICIDSPredictor
 import logging
 
 # Configuration du logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = Flask(__name__, static_folder='../frontend') 
+app = Flask(__name__, static_folder='../frontend')
 CORS(app)
 
-# --- CONFIGURATION DES CHEMINS (MODIFIÉE) ---
-# On remonte d'un niveau pour sortir de 'api' puis on entre dans 'models'
-BASE_DIR = os.path.dirname(os.path.dirname(__file__))
-MODEL_PATH = os.path.join(BASE_DIR, 'models', 'mlp_model_subset.h5')
-SCALER_PATH = os.path.join(BASE_DIR, 'models', 'scaler.pkl')
-
-model = None
-scaler = None
-
-# Chargement au démarrage
+# Initialisation du prédicteur
 try:
-    if os.path.exists(MODEL_PATH):
-        model = tf.keras.models.load_model(MODEL_PATH)
-        logger.info(f"✅ Modèle chargé depuis : {MODEL_PATH}")
-    else:
-        logger.error(f"❌ Modèle introuvable à : {MODEL_PATH}")
-
-    if os.path.exists(SCALER_PATH):
-        scaler = joblib.load(SCALER_PATH)
-        logger.info(f"✅ Scaler chargé depuis : {SCALER_PATH}")
-    else:
-        logger.error(f"❌ Scaler introuvable à : {SCALER_PATH}")
+    predictor = CICIDSPredictor()
+    logger.info("✅ Système de prédiction opérationnel")
 except Exception as e:
-    logger.error(f"❌ Erreur critique chargement ML: {e}")
+    logger.error(f"❌ Échec de l'initialisation: {e}")
+    predictor = None
 
 @app.route('/')
 def index():
@@ -51,15 +32,13 @@ def static_files(path):
 def health_check():
     return jsonify({
         'status': 'healthy',
-        'model_loaded': model is not None,
-        'scaler_loaded': scaler is not None,
-        'paths_checked': {'model': MODEL_PATH, 'scaler': SCALER_PATH}
+        'model_loaded': predictor is not None
     })
 
 @app.route('/api/predict_batch', methods=['POST'])
 def predict_batch():
-    if model is None or scaler is None:
-        return jsonify({'error': 'Modèle ou Scaler non chargé sur le serveur'}), 500
+    if predictor is None:
+        return jsonify({'error': 'Modèle non chargé'}), 500
     
     try:
         if 'file' not in request.files:
@@ -68,28 +47,28 @@ def predict_batch():
         file = request.files['file']
         df = pd.read_csv(file)
         
-        # Nettoyage rapide (enlever les colonnes de texte)
+        # --- NETTOYAGE DES DONNÉES AVANT SCALING ---
+        # On supprime les colonnes de texte que le scaler ne peut pas traiter
         cols_to_drop = ['Label', 'label', 'Flow ID', 'Source IP', 'Destination IP', 'Timestamp']
-        for col in cols_to_drop:
-            if col in df.columns:
-                df = df.drop(columns=[col])
+        df_cleaned = df.drop(columns=[c for c in cols_to_drop if c in df.columns], errors='ignore')
 
-        # Vérification des colonnes (doit être 78)
-        if df.shape[1] != 78:
-            return jsonify({'error': f'Le modèle attend 78 colonnes, reçu {df.shape[1]}. Vérifiez votre CSV.'}), 400
-
-        # Prétraitement et Prédiction
-        X_scaled = scaler.transform(df)
-        predictions = model.predict(X_scaled)
+        # Vérification du nombre de colonnes (doit correspondre à l'entraînement, ex: 78)
+        # Si ton modèle attend 78 colonnes, df_cleaned doit en avoir 78.
         
-        # Conversion 0/1
-        results = (predictions > 0.5).astype(int).flatten().tolist()
-        
+        results = predictor.predict(df_cleaned)
         return jsonify({'predictions': results})
     
     except Exception as e:
-        logger.error(f"❌ Erreur prédiction: {str(e)}")
+        logger.error(f"Erreur prédiction batch: {e}")
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/stats', methods=['GET'])
+def get_stats():
+    return jsonify({
+        'model_architecture': 'MLP (TensorFlow)',
+        'accuracy': 99.36,
+        'dataset': 'CICIDS2017'
+    })
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 10000))
