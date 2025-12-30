@@ -10,15 +10,12 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = Flask(__name__, static_folder='frontend')
+app = Flask(__name__, static_folder='../frontend') # Ajusté pour pointer vers le dossier frontend à la racine
 CORS(app)
 
-# Initialiser le prédicteur
+# Initialiser le prédicteur sans arguments (la classe gère ses propres chemins)
 try:
-    predictor = CICIDSPredictor(
-        model_path='models/mlp_model_subset.h5',
-        scaler_path='models/scaler.pkl'
-    )
+    predictor = CICIDSPredictor()
     logger.info("✅ Modèle chargé avec succès")
 except Exception as e:
     logger.error(f"❌ Erreur chargement modèle: {e}")
@@ -27,12 +24,12 @@ except Exception as e:
 @app.route('/')
 def index():
     """Servir la page d'accueil"""
-    return send_from_directory('frontend', 'index.html')
+    return send_from_directory(app.static_folder, 'index.html')
 
 @app.route('/<path:path>')
 def static_files(path):
-    """Servir les fichiers statiques"""
-    return send_from_directory('frontend', path)
+    """Servir les fichiers statiques (css, js, images)"""
+    return send_from_directory(app.static_folder, path)
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
@@ -45,22 +42,20 @@ def health_check():
 
 @app.route('/api/predict', methods=['POST'])
 def predict():
-    """Prédire si une connexion est une attaque"""
+    """Prédire si une connexion est une attaque (Données JSON)"""
     if predictor is None:
         return jsonify({'error': 'Modèle non chargé'}), 500
     
     try:
         data = request.get_json()
-        
         if 'features' not in data:
             return jsonify({'error': 'Clé "features" manquante'}), 400
         
         features = data['features']
+        # Utilisation de la méthode predict de notre classe
+        result = predictor.predict(np.array([features]))
         
-        # Prédiction
-        result = predictor.predict_single(features)
-        
-        return jsonify(result)
+        return jsonify({'prediction': result[0]})
     
     except Exception as e:
         logger.error(f"Erreur prédiction: {e}")
@@ -68,7 +63,7 @@ def predict():
 
 @app.route('/api/predict_batch', methods=['POST'])
 def predict_batch():
-    """Prédire plusieurs connexions depuis un CSV"""
+    """Prédire plusieurs connexions depuis un fichier CSV"""
     if predictor is None:
         return jsonify({'error': 'Modèle non chargé'}), 500
     
@@ -77,20 +72,16 @@ def predict_batch():
             return jsonify({'error': 'Aucun fichier fourni'}), 400
         
         file = request.files['file']
-        
-        if file.filename == '':
-            return jsonify({'error': 'Nom de fichier vide'}), 400
-        
-        if not file.filename.endswith('.csv'):
+        if file.filename == '' or not file.filename.endswith('.csv'):
             return jsonify({'error': 'Format invalide. Utilisez CSV'}), 400
         
         # Lire le CSV
         df = pd.read_csv(file)
         
-        # Prédiction
-        results = predictor.predict_batch(df)
+        # Supposons que le CSV contient uniquement les features nécessaires
+        results = predictor.predict(df)
         
-        return jsonify(results)
+        return jsonify({'predictions': results})
     
     except Exception as e:
         logger.error(f"Erreur prédiction batch: {e}")
@@ -98,14 +89,12 @@ def predict_batch():
 
 @app.route('/api/stats', methods=['GET'])
 def get_stats():
-    """Obtenir les statistiques du modèle"""
+    """Obtenir les informations du projet pour le mémoire"""
     return jsonify({
         'model_architecture': 'MLP (Multi-Layer Perceptron)',
-        'layers': [128, 64, 32, 1],
-        'activation': 'ReLU + Sigmoid',
         'accuracy': 99.36,
         'dataset': 'CICIDS2017',
-        'training_method': 'Progressive Chunk Training',
+        'cloud_platform': 'Render (PaaS)',
         'attack_types': [
             'DDoS', 'PortScan', 'BotNet', 
             'Web Attack', 'Brute Force SSH/FTP'
@@ -113,5 +102,6 @@ def get_stats():
     })
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
+    # Render utilise la variable d'environnement PORT
+    port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port, debug=False)
