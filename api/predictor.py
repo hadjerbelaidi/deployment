@@ -25,20 +25,23 @@ class CICIDSPredictor:
             print("✅ Ressources ML chargées !")
             
     def predict(self, data):
-        # --- CETTE PARTIE DOIT ÊTRE INDENTÉE ---
         self._load_resources()
         
-        # 1. Normalisation
-        data_scaled = self.scaler.transform(data)
+        # Vérification intelligente : 
+        # Si la valeur maximale est très petite (ex < 10), 
+        # c'est que les données sont déjà scalées.
+        if data.values.max() < 10:
+            print("INFO: Données déjà scalées détectées. Saut du transform.")
+            data_final = data.values
+        else:
+            print("INFO: Données brutes détectées. Application du Scaler.")
+            data_final = self.scaler.transform(data)
         
-        # 2. Prédiction (Probabilités brutes)
-        predictions = self.model.predict(data_scaled, verbose=0)
+        # Prédiction
+        predictions = self.model.predict(data_final, verbose=0)
         
-        # --- LOGS DE DEBUG (Visibles dans Render) ---
-        # On affiche les probabilités pour chaque ligne du CSV
         probs = predictions.flatten().tolist()
         print(f"DEBUG - Probabilités brutes détectées : {probs}")
         
-        # 3. Seuil de décision (Ajusté à 0.7 pour plus de précision)
-        # Retourne 1 (Attack) si probabilité > 0.7, sinon 0 (Normal)
-        return (predictions > 0.7).astype(int).flatten().tolist()
+        # On remet le seuil à 0.5 pour voir si ça bouge
+        return (predictions > 0.5).astype(int).flatten().tolist()
