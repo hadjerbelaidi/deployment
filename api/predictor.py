@@ -2,9 +2,6 @@ import tensorflow as tf
 import numpy as np
 import joblib
 import os
-import logging
-
-logger = logging.getLogger(__name__)
 
 class CICIDSPredictor:
     def __init__(self):
@@ -13,35 +10,32 @@ class CICIDSPredictor:
         self.base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
     def _load_resources(self):
-        """Charge le modèle uniquement s'il n'est pas déjà en mémoire"""
         if self.model is None:
-            print("🚀 Chargement des ressources ML en mémoire...")
             model_path = os.path.join(self.base_path, 'models', 'mlp_model_subset.h5')
             scaler_path = os.path.join(self.base_path, 'models', 'scaler.pkl')
-            
-            # Charger le modèle avec des options d'économie de mémoire
             self.model = tf.keras.models.load_model(model_path, compile=False)
             self.scaler = joblib.load(scaler_path)
-            print("✅ Ressources ML chargées !")
-            
+
     def predict(self, data):
         self._load_resources()
         
-        # Vérification intelligente : 
-        # Si la valeur maximale est très petite (ex < 10), 
-        # c'est que les données sont déjà scalées.
-        if data.values.max() < 10:
-            print("INFO: Données déjà scalées détectées. Saut du transform.")
-            data_final = data.values
-        else:
-            print("INFO: Données brutes détectées. Application du Scaler.")
-            data_final = self.scaler.transform(data)
+        # --- LOGIQUE DE DÉTECTION DU SCALING ---
+        # Si la valeur max est > 10, ce sont des données BRUTES (ex: Port 80)
+        # Si la valeur max est < 10, ce sont des données DÉJÀ SCALÉES (ex: -0.45)
+        valeur_max = np.abs(data.values).max()
         
-        # Prédiction
+        if valeur_max > 10:
+            print(f"DEBUG: Données brutes détectées (max={valeur_max}). Application du scaler.")
+            data_final = self.scaler.transform(data)
+        else:
+            print(f"DEBUG: Données déjà normalisées (max={valeur_max}). On saute le scaler.")
+            data_final = data.values
+
         predictions = self.model.predict(data_final, verbose=0)
         
+        # Log des probabilités brutes pour voir ce que l'IA pense vraiment
         probs = predictions.flatten().tolist()
-        print(f"DEBUG - Probabilités brutes détectées : {probs}")
+        print(f"DEBUG - Probabilités brutes : {probs}")
         
-        # On remet le seuil à 0.5 pour voir si ça bouge
+        # Utilise 0.5 comme seuil car ton modèle a été entraîné proprement
         return (predictions > 0.5).astype(int).flatten().tolist()
