@@ -1,196 +1,140 @@
-// Configuration de l'API
+// Configuration de l'URL (automatique selon l'hébergement)
 const API_BASE = window.location.origin;
 
-// Vérifier l'état de l'API au chargement
-window.addEventListener('DOMContentLoaded', async () => {
-    await checkHealth();
-    await loadStats();
+document.addEventListener('DOMContentLoaded', () => {
+    console.log("🚀 Initialisation du système IDS...");
+    checkHealth();
+    loadHistory();
 });
 
-// Vérifier l'état de l'API
+/**
+ * Vérifie si le serveur Render est réveillé et opérationnel
+ */
 async function checkHealth() {
+    const statusText = document.getElementById('status-text');
+    const indicator = document.getElementById('indicator');
+
     try {
         const response = await fetch(`${API_BASE}/api/health`);
         const data = await response.json();
         
-        const statusText = document.getElementById('status-text');
-        const statusIndicator = document.querySelector('.status-indicator');
-        
-        if (data.status === 'healthy' && data.model_loaded) {
-            if(statusText) statusText.textContent = '✅ Système opérationnel';
-            if(statusIndicator) statusIndicator.classList.add('online');
-        } else {
-            if(statusText) statusText.textContent = '⚠️ Modèle non chargé';
+        if (data.status === 'healthy') {
+            statusText.textContent = '✅ Système Cloud Opérationnel';
+            indicator.classList.add('online');
         }
     } catch (error) {
-        const statusText = document.getElementById('status-text');
-        if(statusText) statusText.textContent = '❌ Erreur connexion';
-        console.error('Erreur health check:', error);
+        statusText.textContent = '❌ Serveur en veille ou déconnecté';
+        indicator.classList.remove('online');
+        console.error("Erreur de connexion API:", error);
     }
 }
 
-// Changer d'onglet
-function switchTab(tabName) {
-    document.querySelectorAll('.tab-content').forEach(tab => {
-        tab.classList.remove('active');
-    });
-    document.querySelectorAll('.tab-btn').forEach(btn => {
-        btn.classList.remove('active');
-    });
-    document.getElementById(`${tabName}-tab`).classList.add('active');
-    event.target.classList.add('active');
-}
-
-// Charger un exemple de données (CICIDS2017 a 78-79 features)
-function loadExample() {
-    const exampleFeatures = Array.from({length: 78}, () => Math.random());
-    const exampleData = { features: exampleFeatures };
-    document.getElementById('features-input').value = JSON.stringify(exampleData, null, 2);
-}
-
-// Prédiction unique
-async function predictSingle() {
-    const input = document.getElementById('features-input').value;
-    const resultDiv = document.getElementById('single-result');
-    
-    if (!input.trim()) {
-        showResult(resultDiv, 'Erreur', 'Veuillez entrer des données', 'info');
-        return;
-    }
-    
-    try {
-        const data = JSON.parse(input);
-        showLoading(resultDiv);
-        
-        const response = await fetch(`${API_BASE}/api/predict`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(data)
-        });
-        
-        const result = await response.json();
-        if (result.error) {
-            showResult(resultDiv, 'Erreur', result.error, 'info');
-            return;
-        }
-        
-        displaySingleResult(resultDiv, result);
-    } catch (error) {
-        showResult(resultDiv, 'Erreur', 'Format JSON invalide ou erreur serveur', 'info');
-    }
-}
-
-function displaySingleResult(div, result) {
-    // Adaptation : 0 est normal, 1 est attaque dans ton modèle
-    const isAttack = result.prediction !== 0; 
-    const label = isAttack ? 'ATTACK' : 'BENIGN';
-    const className = isAttack ? 'attack' : 'normal';
-    const icon = isAttack ? '🚨' : '✅';
-    
-    div.className = `result-box ${className}`;
-    div.style.display = 'block';
-    div.innerHTML = `
-        <div class="result-title">${icon} ${label}</div>
-        <div class="result-detail"><strong>Classe détectée:</strong> ${result.prediction}</div>
-        <div class="result-detail">Analyse effectuée par le modèle MLP dans le Cloud.</div>
-    `;
-}
-
-// Gérer la sélection de fichier
+/**
+ * Gère l'affichage du nom du fichier sélectionné
+ */
 function handleFileSelect(event) {
     const file = event.target.files[0];
-    const fileName = document.getElementById('file-name');
-    const batchBtn = document.getElementById('batch-btn');
+    const display = document.getElementById('file-name-display');
+    const btn = document.getElementById('batch-btn');
+
     if (file) {
-        fileName.textContent = `✓ ${file.name}`;
-        batchBtn.disabled = false;
+        display.textContent = `Fichier sélectionné : ${file.name}`;
+        btn.disabled = false;
+    } else {
+        display.textContent = "";
+        btn.disabled = true;
     }
 }
 
-// Prédiction batch (CSV)
+/**
+ * Envoie le fichier CSV au serveur pour analyse
+ */
 async function predictBatch() {
     const fileInput = document.getElementById('csv-file');
     const resultDiv = document.getElementById('batch-result');
+    const btn = document.getElementById('batch-btn');
+
+    if (!fileInput.files[0]) return;
+
     const formData = new FormData();
     formData.append('file', fileInput.files[0]);
-    
-    showLoading(resultDiv);
-    
+
+    // UI Feedback
+    btn.disabled = true;
+    const originalBtnText = btn.textContent;
+    btn.textContent = "⏳ Analyse Cloud en cours...";
+    resultDiv.style.display = "block";
+    resultDiv.innerHTML = "<p>Transmission des données vers le modèle Deep Learning...</p>";
+
     try {
         const response = await fetch(`${API_BASE}/api/predict_batch`, {
             method: 'POST',
             body: formData
         });
-        const result = await response.json();
-        
-        // Calculer les stats pour l'affichage original
-        const total = result.predictions.length;
-        const attacks = result.predictions.filter(p => p !== 0).length;
-        const normal = total - attacks;
-        const percent = ((attacks / total) * 100).toFixed(2);
 
-        displayBatchResult(resultDiv, {
-            total_connections: total,
-            attacks_detected: attacks,
-            normal_detected: normal,
-            attack_percentage: percent,
-            predictions: result.predictions.map((p, i) => ({
-                index: i + 1,
-                prediction: p !== 0 ? 'ATTACK' : 'BENIGN'
-            }))
-        });
-    } catch (error) {
-        showResult(resultDiv, 'Erreur', 'Erreur lors de l\'analyse', 'info');
-    }
-}
+        if (!response.ok) throw new Error("Erreur serveur lors de l'analyse");
 
-function displayBatchResult(div, data) {
-    const className = data.attacks_detected > 0 ? 'attack' : 'normal';
-    div.className = `result-box ${className}`;
-    div.style.display = 'block';
-    
-    let html = `
-        <div class="result-title">📊 Rapport d'Analyse Cloud</div>
-        <div class="result-detail"><strong>Total:</strong> ${data.total_connections}</div>
-        <div class="result-detail">🚨 <strong>Attaques:</strong> ${data.attacks_detected} (${data.attack_percentage}%)</div>
-        <div class="result-detail">✅ <strong>Normal:</strong> ${data.normal_detected}</div>
-        <div style="margin-top:10px; max-height:150px; overflow-y:auto; font-size:0.8em;">
-    `;
-    
-    data.predictions.slice(0, 50).forEach(p => {
-        html += `<div>Ligne ${p.index}: ${p.prediction}</div>`;
-    });
-    
-    html += `</div>`;
-    div.innerHTML = html;
-}
+        const data = await response.json();
 
-// Charger les statistiques depuis l'API
-async function loadStats() {
-    const statsContent = document.getElementById('stats-content');
-    try {
-        const response = await fetch(`${API_BASE}/api/stats`);
-        const stats = await response.json();
-        
-        statsContent.innerHTML = `
-            <div class="stat-card"><h4>Architecture</h4><div class="value">${stats.model_architecture}</div></div>
-            <div class="stat-card"><h4>Précision</h4><div class="value">${stats.accuracy}%</div></div>
-            <div class="stat-card"><h4>Dataset</h4><div class="value">${stats.dataset}</div></div>
-            <div class="stat-card"><h4>Cloud</h4><div class="value">${stats.cloud_platform}</div></div>
+        // Affichage des résultats immédiats
+        const attackDetected = data.attacks > 0;
+        resultDiv.innerHTML = `
+            <div style="text-align: left;">
+                <h2 style="color: ${attackDetected ? 'var(--danger)' : 'var(--success)'}; margin-top:0;">
+                    ${attackDetected ? '🚨 ALERTE : Intrusion Détectée' : '✅ Trafic Analysé comme Sain'}
+                </h2>
+                <hr style="border:0; border-top: 1px solid var(--border); margin: 15px 0;">
+                <p>Analyse terminée pour : <b>${data.filename}</b></p>
+                <div style="display: flex; gap: 20px; font-size: 1.1em;">
+                    <span>📊 Total : <b>${data.total}</b></span>
+                    <span style="color: var(--danger)">🚨 Attaques : <b>${data.attacks}</b></span>
+                    <span style="color: var(--success)">🛡️ Normal : <b>${data.total - data.attacks}</b></span>
+                </div>
+            </div>
         `;
-    } catch (e) {
-        console.error("Erreur stats");
+
+        // Rafraîchir l'historique car une nouvelle ligne a été ajoutée en DB
+        loadHistory();
+
+    } catch (error) {
+        resultDiv.innerHTML = `<p style="color: var(--danger)">❌ Erreur : ${error.message}</p>`;
+    } finally {
+        btn.disabled = false;
+        btn.textContent = originalBtnText;
     }
 }
 
-function showLoading(div) {
-    div.className = 'result-box info';
-    div.style.display = 'block';
-    div.innerHTML = '<div class="loading">⏳ Analyse Cloud en cours...</div>';
-}
+/**
+ * Récupère les 10 derniers scans depuis la base SQLite
+ */
+async function loadHistory() {
+    const tbody = document.getElementById('history-body');
 
-function showResult(div, title, message, type = 'info') {
-    div.className = `result-box ${type}`;
-    div.style.display = 'block';
-    div.innerHTML = `<div class="result-title">${title}</div><div class="result-detail">${message}</div>`;
+    try {
+        const response = await fetch(`${API_BASE}/api/history`);
+        const history = await response.json();
+        
+        if (!history || history.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;">Aucune donnée historique.</td></tr>';
+            return;
+        }
+
+        // Construction des lignes du tableau
+        tbody.innerHTML = history.map(row => `
+            <tr>
+                <td>${row.date}</td>
+                <td style="font-family: monospace;">${row.filename}</td>
+                <td>${row.total}</td>
+                <td>
+                    <span class="${row.attacks > 0 ? 'badge-attack' : 'badge-benign'}">
+                        ${row.attacks} ${row.attacks > 0 ? 'ATTACK(S)' : 'CLEAN'}
+                    </span>
+                </td>
+            </tr>
+        `).join('');
+
+    } catch (error) {
+        console.error("Erreur historique:", error);
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color: var(--danger);">Erreur de chargement.</td></tr>';
+    }
 }
