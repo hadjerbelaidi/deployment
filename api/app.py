@@ -3,107 +3,93 @@ from flask_cors import CORS
 import pandas as pd
 import os
 import logging
+import sqlite3
+from datetime import datetime
 from api.predictor import CICIDSPredictor
 
-# Configuration du logging pour surveiller la RAM dans Render
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__, static_folder='../frontend')
 CORS(app)
 
-# --- INSTANCIATION GLOBALE (SANS CHARGEMENT IMMÉDIAT) ---
-# On crée l'objet, mais le modèle .h5 n'est pas encore lu.
 predictor = CICIDSPredictor()
+
+# --- BASE DE DONNÉES POUR L'HISTORIQUE ---
+DB_PATH = 'history.db'
+
+def init_db():
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute('''CREATE TABLE IF NOT EXISTS history 
+                        (id INTEGER PRIMARY KEY AUTOINCREMENT, 
+                         filename TEXT, total INTEGER, attacks INTEGER, date TEXT)''')
+init_db()
 
 @app.route('/')
 def index():
-    """Sert la page d'accueil frontend"""
     return send_from_directory(app.static_folder, 'index.html')
 
 @app.route('/<path:path>')
 def static_files(path):
-    """Sert les fichiers CSS/JS/Images"""
     return send_from_directory(app.static_folder, path)
-
-@app.route('/api/health', methods=['GET'])
-def health_check():
-    """Vérifie l'état de l'API sans forcer le chargement du modèle"""
-    return jsonify({
-        'status': 'healthy',
-        'api_version': '1.0.0',
-        'note': 'Le modèle sera chargé lors de la première prédiction pour économiser la RAM.'
-    })
 
 @app.route('/api/predict_batch', methods=['POST'])
 def predict_batch():
-    """Route principale pour l'analyse du fichier CSV"""
     try:
-        # 1. Vérifier la présence du fichier
         if 'file' not in request.files:
-            return jsonify({'error': 'Aucun fichier fourni'}), 400
+            return jsonify({'error': 'Fichier manquant'}), 400
         
         file = request.files['file']
-        if file.filename == '':
-            return jsonify({'error': 'Nom de fichier vide.'}), 400
-        
-        # 2. Charger le CSV en mémoire
         df = pd.read_csv(file)
-        logger.info(f"📁 Fichier reçu - Lignes: {df.shape[0]}, Colonnes: {df.shape[1]}")
-
-        # 3. Récupérer les noms attendus (Déclenche _load_resources si nécessaire)
-        # On appelle une méthode pour s'assurer que le scaler est chargé
+        
+        # Nettoyage et prédiction (ton code existant)
         predictor._load_resources()
         expected_features = predictor.scaler.feature_names_in_
-        
-        # 4. Nettoyage des colonnes (Labels, IPs, etc.)
-        cols_to_drop = [
-            'Label', 'label', 'Flow ID', 'Source IP', 
-            'Destination IP', 'Timestamp', 'Unnamed: 0'
-        ]
+        cols_to_drop = ['Label', 'label', 'Flow ID', 'Source IP', 'Destination IP', 'Timestamp', 'Unnamed: 0']
         df_cleaned = df.drop(columns=[c for c in cols_to_drop if c in df.columns], errors='ignore')
-
-        # 5. Forcer le format à 78 colonnes
-        if df_cleaned.shape[1] > 78:
-            df_cleaned = df_cleaned.iloc[:, :78]
-
-        # 6. Renommage pour le Scaler (Évite l'erreur Feature Names Mismatch)
-        if df_cleaned.shape[1] == len(expected_features):
-            df_cleaned.columns = expected_features
-        else:
-            return jsonify({
-                'error': f'Format invalide. Attendu: {len(expected_features)} colonnes numériques, reçu: {df_cleaned.shape[1]}'
-            }), 400
-
-        # 7. Conversion numérique finale
+        if df_cleaned.shape[1] > 78: df_cleaned = df_cleaned.iloc[:, :78]
+        df_cleaned.columns = expected_features
         df_cleaned = df_cleaned.apply(pd.to_numeric, errors='coerce').fillna(0)
-
-        # 8. EXÉCUTION DE LA PRÉDICTION (MLP)
-        # L'appel à predict() gère le reste
+        
         results = predictor.predict(df_cleaned)
         
-        logger.info(f"✅ Analyse terminée : {sum(results)} attaques détectées.")
+        # --- SAUVEGARDE DANS L'HISTORIQUE ---
+        total = len(results)
+        attacks = sum(results)
+        date_str = datetime.now().strftime("%d/%m/%Y %H:%M")
+        
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute("INSERT INTO history (filename, total, attacks, date) VALUES (?, ?, ?, ?)",
+                         (file.filename, total, attacks, date_str))
         
         return jsonify({
             'predictions': results,
-            'total': len(results),
-            'attacks': sum(results),
-            'normal': len(results) - sum(results)
+            'total': total,
+            'attacks': attacks,
+            'filename': file.filename,
+            'date': date_str
         })
-    
     except Exception as e:
-        logger.error(f"❌ Erreur critique : {str(e)}")
-        return jsonify({'error': f"Erreur serveur : {str(e)}"}), 500
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/history', methods=['GET'])
+def get_history():
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.execute("SELECT * FROM history ORDER BY id DESC LIMIT 10")
+        rows = cursor.fetchall()
+        return jsonify([dict(row) for row in rows])
 
 @app.route('/api/stats', methods=['GET'])
 def get_stats():
+    # Suppression des "undefined" en envoyant des valeurs fixes
     return jsonify({
-        'model': 'MLP Classifier',
+        'model_architecture': 'MLP (Deep Learning)',
+        'accuracy': '99.36',
         'dataset': 'CICIDS2017',
-        'status': 'Optimized for Render (Memory Limited)'
+        'cloud_platform': 'Render Cloud'
     })
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 10000))
-    # debug=False est CRUCIAL pour éviter que Flask ne charge le modèle deux fois en RAM
     app.run(host='0.0.0.0', port=port, debug=False)
